@@ -21,6 +21,10 @@ class _ChatProtocol(asyncio.Protocol):
         print("Connected!")
 
 
+def say(message):
+    _ChatProtocol.transport.sendto(message.encode(), (BROADCAST_ADDR, PORT))
+
+
 def main():
     loop = asyncio.get_event_loop()
     protocol = loop.create_datagram_endpoint(
@@ -32,7 +36,7 @@ def main():
         cmd, *args = input("? ").split(" ")
         if cmd.lower() == "say":
             message = " ".join(args)
-            print(message)
+            say(message)
         else:
             print("Unknown command: {}".format(cmd))
 
