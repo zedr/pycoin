@@ -2,8 +2,8 @@
 import asyncio
 import socket
 
-BIND_ADDR = "127.1"
-BROADCAST_ADDR = "0.0.0.0"
+BIND_ADDR = "0"
+BROADCAST_ADDR = "0"
 PORT = 1337
 
 
@@ -18,27 +18,34 @@ class _ChatProtocol(asyncio.Protocol):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         cls.transport = transport
-        print("Connected!")
+
+    def datagram_received(self, data, addr):
+        ip, port = addr
+        message = data.decode()
+        print("\n{} said {}".format(ip, message))
 
 
 def say(message):
     _ChatProtocol.transport.sendto(message.encode(), (BROADCAST_ADDR, PORT))
 
 
-def main():
+async def main():
+    while True:
+        line = await loop.run_in_executor(None, input, "? ")
+        cmd, *args = line.split(" ")
+        if cmd.lower() == "say":
+            message = " ".join(args)
+            print("Say: " + message)
+            say(message)
+        else:
+            print("Unknown command: {}".format(cmd))
+
+
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     protocol = loop.create_datagram_endpoint(
         _ChatProtocol,
         local_addr=(BIND_ADDR, PORT)
     )
-    loop.run_until_complete(protocol)
-    while True:
-        cmd, *args = input("? ").split(" ")
-        if cmd.lower() == "say":
-            message = " ".join(args)
-            say(message)
-        else:
-            print("Unknown command: {}".format(cmd))
-
-if __name__ == "__main__":
-    main()
+    tasks = (protocol, main())
+    loop.run_until_complete(asyncio.gather(*tasks))
