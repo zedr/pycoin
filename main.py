@@ -2,15 +2,20 @@
 import asyncio
 import socket
 import base64
+from hashlib import sha256
+import logging
 
+logging.basicConfig(level=logging.INFO)
+
+NAME = "Rigel"
 BIND_ADDR = "0"
 BROADCAST_ADDR = "0"
-PORT = 1337
+PORT = 31139
 
 # Cannot pick primes greater than 1000
 P = 389
 Q = 673
-E = 31139
+E = PORT
 
 
 def is_prime(num: int) -> bool:
@@ -38,16 +43,26 @@ def _enc(num: int, key: tuple) -> int:
     return pow(num, a, modulus) # (num ** a) % modulus
 
 
-def _enc_str(text: str, key: tuple) -> bytes:
+def _enc_str(text: str, key: tuple) -> str:
     return "".join(chr(_enc(ord(ch), key)) for ch in text)
 
 
-def encrypt(plaintext: str, key: tuple) -> str:
+def encrypt(plaintext: str, key: tuple) -> bytes:
     return base64.b64encode(_enc_str(plaintext, key).encode())
 
 
 def decrypt(cyphertext: bytes, key: tuple) -> str:
     return _enc_str(base64.b64decode(cyphertext).decode(), key)
+
+
+def sign(plaintext: str, key: tuple) -> str:
+    hsh = sha256(plaintext.encode()).hexdigest()[:8]
+    return encrypt(hsh, key)
+
+
+def verify(plaintext: str, key: tuple, signature: str) -> bool:
+    hsh = sha256(plaintext.encode()).hexdigest()[:8]
+    return hsh == decrypt(signature.encode(), key)
 
 
 assert is_prime(P)
@@ -77,24 +92,32 @@ class _ChatProtocol(asyncio.Protocol):
 
     def datagram_received(self, data, addr):
         ip, port = addr
-        message = data.decode()
-        print("\n{} said {}".format(ip, message))
+        payload = data.decode()
+        name, key, cmd, signature, *args = payload.split(" ")
+        message = " ".join(args)
+        if verify(message, (int(key), E), signature):
+            if cmd == "say":
+                print("{}|{} {} said {}".format(ip, name, key, message))
+        else:
+            logging.warn("{} sent an invalid message: {}".format(ip, payload))
 
 
 def say(message):
-    _ChatProtocol.transport.sendto(message.encode(), (BROADCAST_ADDR, PORT))
+    signed = sign(message, PRIVATE_KEY)
+    payload = "{} {} say {} {}".format(NAME, MODULUS + 1, signed.decode(), message)
+    _ChatProtocol.transport.sendto(payload.encode(), (BROADCAST_ADDR, PORT))
 
 
 async def main():
     while True:
         line = await loop.run_in_executor(None, input, "? ")
         cmd, *args = line.split(" ")
-        if cmd.lower() == "say":
-            message = " ".join(args)
-            print("Say: " + message)
-            say(message)
-        else:
-            print("Unknown command: {}".format(cmd))
+        if cmd:
+            if cmd.lower() == "say":
+                message = " ".join(args)
+                say(message)
+            else:
+                logging.error("Unknown command: %s", cmd)
 
 
 if __name__ == "__main__":
