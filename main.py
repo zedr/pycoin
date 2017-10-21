@@ -2,8 +2,10 @@
 import asyncio
 import socket
 import base64
-from hashlib import sha256
 import logging
+import datetime as dt
+from hashlib import sha256
+from collections import namedtuple
 
 logging.basicConfig(level=logging.INFO)
 
@@ -55,14 +57,14 @@ def decrypt(cyphertext: bytes, key: tuple) -> str:
     return _enc_str(base64.b64decode(cyphertext).decode(), key)
 
 
-def sign(plaintext: str, key: tuple) -> str:
+def sign(plaintext: str, key: tuple) -> bytes:
     hsh = sha256(plaintext.encode()).hexdigest()[:8]
     return encrypt(hsh, key)
 
 
-def verify(plaintext: str, key: tuple, signature: str) -> bool:
+def verify(plaintext: str, key: tuple, signature: bytes) -> bool:
     hsh = sha256(plaintext.encode()).hexdigest()[:8]
-    return hsh == decrypt(signature.encode(), key)
+    return hsh == decrypt(signature, key)
 
 
 assert is_prime(P)
@@ -75,8 +77,39 @@ T = (P - 1) * (Q - 1)
 # UNSAFE: skip the check for coprimes
 PRIVATE_KEY = (MODULUS, modinv(E, T))
 PUBLIC_KEY = (MODULUS, E)
-PUBLIC_KEY_NAME = "{}-{}".format(*PUBLIC_KEY)
 
+################################################################################
+# Blockchain
+
+class Transaction:
+    def __init__(self, prev_hash: str, pub_key: int, signature: bytes):
+        self._prev_hash = prev_hash or ""
+        self._pub_key = pub_key
+        self._signature = signature
+
+    def as_hash(self):
+        payload = "{} {} {}".format(
+            self._signature.decode(), self._pub_key, self._prev_hash
+        )
+        return sha256(payload.encode()).hexdigest()
+
+    def transfer_to(self, pub_key):
+        hsh = self.as_hash()
+        payload = "{} {}".format(hsh, pub_key)
+        signature = sign(payload, PRIVATE_KEY)
+        return Transaction(hsh, pub_key, signature)
+
+    def verify_for(self, pub_key):
+        payload = "{} {}".format(self._prev_hash, self._pub_key)
+        return verify(
+            payload, 
+            (pub_key, E),
+            self._signature
+        )
+
+
+################################################################################
+# Network
 
 class _ChatProtocol(asyncio.Protocol):
     """A protocol for chatting among peers.
@@ -93,19 +126,22 @@ class _ChatProtocol(asyncio.Protocol):
     def datagram_received(self, data, addr):
         ip, port = addr
         payload = data.decode()
-        name, key, cmd, signature, *args = payload.split(" ")
+        name, key, cmd, *args = payload.split(" ")
         message = " ".join(args)
-        if verify(message, (int(key), E), signature):
-            if cmd == "say":
-                print("{}|{} {} said {}".format(ip, name, key, message))
-        else:
-            logging.warn("{} sent an invalid message: {}".format(ip, payload))
+        logging.info(
+            "Received from {} {} {}: {}".format(
+                name, ip, key, message
+            )
+        )
 
 
-def say(message):
-    signed = sign(message, PRIVATE_KEY)
-    payload = "{} {} say {} {}".format(NAME, MODULUS + 1, signed.decode(), message)
+def broadcast(message):
+    payload = "{} {} {}".format(NAME, MODULUS, message)
     _ChatProtocol.transport.sendto(payload.encode(), (BROADCAST_ADDR, PORT))
+
+
+def transfer(to: int, amount: int):
+    pass
 
 
 async def main():
@@ -113,14 +149,16 @@ async def main():
         line = await loop.run_in_executor(None, input, "? ")
         cmd, *args = line.split(" ")
         if cmd:
-            if cmd.lower() == "say":
-                message = " ".join(args)
-                say(message)
+            if cmd == "say":
+                broadcast(" ".join((["say"] + args)))
+            elif cmd == "tx":
+                to, amount = args
+                transfer(amount, to)
             else:
                 logging.error("Unknown command: %s", cmd)
 
 
-if __name__ == "__main__":
+if __name__ == "a__main__":
     loop = asyncio.get_event_loop()
     protocol = loop.create_datagram_endpoint(
         _ChatProtocol,
