@@ -83,29 +83,38 @@ PUBLIC_KEY = (MODULUS, E)
 
 class Transaction:
     def __init__(self, prev_hash: str, pub_key: int, signature: bytes):
-        self._prev_hash = prev_hash or ""
+        self._prev_hash = prev_hash or "0"
         self._pub_key = pub_key
-        self._signature = signature
+        self._signature = signature or b"0"
 
-    def as_hash(self):
-        payload = "{} {} {}".format(
+    def __str__(self):
+        return "{} {} {}".format(
             self._signature.decode(), self._pub_key, self._prev_hash
         )
-        return sha256(payload.encode()).hexdigest()
 
-    def transfer_to(self, pub_key):
+    def as_hash(self) -> str:
+        return sha256(str(self).encode()).hexdigest()[:8]
+
+    def transfer_to(self, pub_key: int) -> 'Transaction':
         hsh = self.as_hash()
         payload = "{} {}".format(hsh, pub_key)
         signature = sign(payload, PRIVATE_KEY)
         return Transaction(hsh, pub_key, signature)
 
-    def verify_for(self, pub_key):
+    def verify_for(self, pub_key: int) -> bool:
         payload = "{} {}".format(self._prev_hash, self._pub_key)
-        return verify(
-            payload, 
-            (pub_key, E),
-            self._signature
-        )
+        if self.is_coinbase:
+            return True
+        else:
+            return verify(
+                payload, 
+                (pub_key, E),
+                self._signature
+            )
+
+    @property
+    def is_coinbase(self):
+        return self._prev_hash == self._signature.decode() == "0"
 
 
 ################################################################################
@@ -129,8 +138,8 @@ class _ChatProtocol(asyncio.Protocol):
         name, key, cmd, *args = payload.split(" ")
         message = " ".join(args)
         logging.info(
-            "Received from {} {} {}: {}".format(
-                name, ip, key, message
+            "Received '{}' from {} {} {}: {}".format(
+                cmd, name, ip, key, message
             )
         )
 
@@ -140,8 +149,9 @@ def broadcast(message):
     _ChatProtocol.transport.sendto(payload.encode(), (BROADCAST_ADDR, PORT))
 
 
-def transfer(to: int, amount: int):
-    pass
+def transfer(to: int):
+    transaction = Transaction("", to, b"")
+    broadcast("tx {}".format(transaction))
 
 
 async def main():
@@ -152,13 +162,13 @@ async def main():
             if cmd == "say":
                 broadcast(" ".join((["say"] + args)))
             elif cmd == "tx":
-                to, amount = args
-                transfer(amount, to)
+                to = args[0]
+                transfer(to)
             else:
                 logging.error("Unknown command: %s", cmd)
 
 
-if __name__ == "a__main__":
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     protocol = loop.create_datagram_endpoint(
         _ChatProtocol,
