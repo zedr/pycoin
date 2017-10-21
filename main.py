@@ -142,6 +142,14 @@ class _ChatProtocol(asyncio.Protocol):
                 cmd, name, ip, key, message
             )
         )
+        if cmd == "tx":
+            sig, num, hsh = args
+            key = int(num)
+            tr = Transaction(hsh, key, sig.encode())
+            if key == MODULUS:
+                logging.info("Received a Pycoin! " + tr.as_hash())
+            else:
+                logging.info("Got TX {} for {}".format(tr.as_hash(), key))
 
 
 def broadcast(message):
