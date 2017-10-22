@@ -200,9 +200,6 @@ class _CoinProtocol(asyncio.Protocol):
             else:
                 logging.info("Got TX {} for {}".format(tr.as_hash(), key))
 
-            if self._current_block is None:
-
-
 
 
 def broadcast(message):
@@ -229,7 +226,7 @@ async def main():
                 logging.error("Unknown command: %s", cmd)
 
 
-if __name__ == "a__main__":
+if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     protocol = loop.create_datagram_endpoint(
         _CoinProtocol,
