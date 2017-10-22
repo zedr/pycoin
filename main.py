@@ -117,13 +117,62 @@ class Transaction:
         return self._prev_hash == self._signature.decode() == "0"
 
 
+class Block:
+    def __init__(self, prev: 'Block' = None):
+        self._transactions = []
+        self._prev = prev
+
+    @property
+    def prev(self):
+        return self._prev
+
+    def add(self, *txs) -> int:
+        self._transactions += txs
+        return len(self._transactions)
+
+    def as_hash(self) -> str:
+        payload = self._prev.as_hash() if self._prev else ""
+        payload = " ".join(tx.as_hash() for tx in self._transactions).encode()
+        return sha256(payload).hexdigest()[:8]
+
+    @property
+    def is_genesis(self):
+        return not self._prev
+
+    def __eq__(self, other):
+        return self.as_hash() == other.as_hash()
+
+
+class BlockChain:
+    def __init__(self):
+        self.tip = gb = Block()
+        gb.add(
+            Transaction("", 261797, b""),
+            Transaction("", 261797, b""),
+            Transaction("", 261797, b""),
+            Transaction("", 261797, b""),
+            Transaction("", 261797, b"")
+        )
+
+    def add(self, block: Block) -> bool:
+        if self.tip == block.prev:
+            self.tip = block
+            return True
+        else:
+            return False
+
+
 ################################################################################
 # Network
 
-class _ChatProtocol(asyncio.Protocol):
+class _CoinProtocol(asyncio.Protocol):
     """A protocol for chatting among peers.
     """
     transport = None
+    # Our blockchain
+    _bc = BlockChain()
+    # The current block being assembled
+    _cb = None
 
     @classmethod
     def connection_made(cls, transport):
@@ -151,10 +200,14 @@ class _ChatProtocol(asyncio.Protocol):
             else:
                 logging.info("Got TX {} for {}".format(tr.as_hash(), key))
 
+            if self._current_block is None:
+
+
+
 
 def broadcast(message):
     payload = "{} {} {}".format(NAME, MODULUS, message)
-    _ChatProtocol.transport.sendto(payload.encode(), (BROADCAST_ADDR, PORT))
+    _CoinProtocol.transport.sendto(payload.encode(), (BROADCAST_ADDR, PORT))
 
 
 def transfer(to: int):
@@ -176,10 +229,10 @@ async def main():
                 logging.error("Unknown command: %s", cmd)
 
 
-if __name__ == "__main__":
+if __name__ == "a__main__":
     loop = asyncio.get_event_loop()
     protocol = loop.create_datagram_endpoint(
-        _ChatProtocol,
+        _CoinProtocol,
         local_addr=(BIND_ADDR, PORT)
     )
     tasks = (protocol, main())
